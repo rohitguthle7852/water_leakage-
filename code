@@ -1,0 +1,181 @@
+/************************************************************
+   SMART WATER LEAKAGE & CONSUMPTION MONITORING SYSTEM
+   USING ESP8266 + BLYNK + 2 FLOW SENSORS + I2C LCD
+************************************************************/
+
+/*---------------- BLYNK DETAILS ----------------*/
+
+#define BLYNK_TEMPLATE_ID "TMPL36gq_1h_C"
+#define BLYNK_TEMPLATE_NAME "water leakage Detection"
+#define BLYNK_AUTH_TOKEN "xyePp7FG3CDfo5SSIj1qcmbriH4b05bj"
+
+/*---------------- LIBRARIES ----------------*/
+
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+/*---------------- WIFI DETAILS ----------------*/
+
+char ssid[] = "its_rohit";
+char pass[] = "0909090909";
+
+/*---------------- LCD SETUP ----------------*/
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+/*---------------- PIN DEFINITIONS ----------------*/
+
+#define FLOW_SENSOR_1 D5
+#define FLOW_SENSOR_2 D6
+#define BUZZER D7
+
+/*---------------- VARIABLES ----------------*/
+
+volatile int pulseCount1 = 0;
+volatile int pulseCount2 = 0;
+
+float flowRate1 = 0;
+float flowRate2 = 0;
+float leakage = 0;
+
+/*---------------- TIMER ----------------*/
+
+BlynkTimer timer;
+
+/*---------------- INTERRUPT FUNCTIONS ----------------*/
+
+ICACHE_RAM_ATTR void pulseCounter1()
+{
+  pulseCount1++;
+}
+
+ICACHE_RAM_ATTR void pulseCounter2()
+{
+  pulseCount2++;
+}
+
+/*---------------- SETUP ----------------*/
+
+void setup()
+{
+  Serial.begin(115200);
+
+  /* BUZZER */
+
+  pinMode(BUZZER, OUTPUT);
+  digitalWrite(BUZZER, LOW);
+
+  /* LCD START */
+
+  lcd.init();
+  lcd.backlight();
+
+  lcd.setCursor(0, 0);
+  lcd.print("SMART WATER");
+
+  lcd.setCursor(0, 1);
+  lcd.print("MONITORING");
+
+  delay(2000);
+
+  lcd.clear();
+
+  /* FLOW SENSOR INPUTS */
+
+  pinMode(FLOW_SENSOR_1, INPUT_PULLUP);
+  pinMode(FLOW_SENSOR_2, INPUT_PULLUP);
+
+  attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_1), pulseCounter1, FALLING);
+  attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_2), pulseCounter2, FALLING);
+
+  /* CONNECT TO BLYNK */
+
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+
+  /* TIMER */
+
+  timer.setInterval(1000L, readFlowSensors);
+}
+
+/*---------------- MAIN LOOP ----------------*/
+
+void loop()
+{
+  Blynk.run();
+  timer.run();
+}
+
+/*---------------- FLOW SENSOR FUNCTION ----------------*/
+
+void readFlowSensors()
+{
+  noInterrupts();
+
+  int count1 = pulseCount1;
+  int count2 = pulseCount2;
+
+  pulseCount1 = 0;
+  pulseCount2 = 0;
+
+  interrupts();
+
+  /* FLOW CALCULATION */
+
+  flowRate1 = count1 / 7.5;
+  flowRate2 = count2 / 7.5;
+
+  /* LEAKAGE CALCULATION */
+
+  leakage = abs(flowRate1 - flowRate2);
+
+  /* SERIAL MONITOR */
+
+  Serial.print("Input Flow: ");
+  Serial.print(flowRate1);
+  Serial.print(" L/min\t");
+
+  Serial.print("Output Flow: ");
+  Serial.print(flowRate2);
+  Serial.print(" L/min\t");
+
+  Serial.print("Leakage: ");
+  Serial.println(leakage);
+
+  /* LCD DISPLAY */
+
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("IN:");
+  lcd.print(flowRate1, 1);
+
+  lcd.print(" OUT:");
+  lcd.print(flowRate2, 1);
+
+  lcd.setCursor(0, 1);
+
+  /* LEAKAGE DETECTION */
+
+  if (leakage > 1.5)
+  {
+    lcd.print("LEAKAGE ALERT");
+
+    digitalWrite(BUZZER, HIGH);
+
+    Blynk.logEvent("leakage_alert", "Water Leakage Detected!");
+  }
+  else
+  {
+    lcd.print("SYSTEM NORMAL");
+
+    digitalWrite(BUZZER, LOW);
+  }
+
+  /* SEND DATA TO BLYNK */
+
+  Blynk.virtualWrite(V0, flowRate1);
+  Blynk.virtualWrite(V1, flowRate2);
+  Blynk.virtualWrite(V2, leakage);
+}
